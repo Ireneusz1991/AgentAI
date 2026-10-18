@@ -61,6 +61,28 @@ LEGAL_ACTS = _comp_mod.LEGAL_ACTS
 SAMPLE_DOCUMENTS = _doc_mod.SAMPLE_DOCUMENTS
 MESSY_WAREHOUSE_CSV = _messy_mod.MESSY_WAREHOUSE_CSV
 
+
+def export_to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Audyt_OptiDoc") -> bytes:
+    """Generuje natywny arkusz Excel (.xlsx) za pomocą biblioteki openpyxl."""
+    output = io.BytesIO()
+    try:
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
+        return output.getvalue()
+    except Exception:
+        return df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
+
+
+def export_to_excel_compatible_csv(df: pd.DataFrame) -> bytes:
+    """
+    Generuje plik CSV w 100% zoptymalizowany pod polską wersję programu Microsoft Excel:
+    1. Kodowanie UTF-8 z BOM (utf-8-sig) - brak zniekształceń polskich znaków (ą, ć, ę, ł, ń, ó, ś, ź, ż).
+    2. Separator kolumn: średnik (;) - automatyczny podział na kolumny A, B, C zamiast zbijania w jedną kolumnę.
+    3. Separator dziesiętny: przecinek (,) - Excel rozpoznaje kwoty jako liczby do sumowania formułą =SUMA().
+    """
+    csv_str = df.to_csv(index=False, sep=";", decimal=",")
+    return csv_str.encode("utf-8-sig")
+
 # -------------------------------------------------------------
 # 1. KONFIGURACJA STRONY & STYLING ENTERPRISE
 # -------------------------------------------------------------
@@ -357,24 +379,33 @@ with tab_finance:
             df_fin = pd.DataFrame([res])
             st.dataframe(df_fin, use_container_width=True)
             
-            buf_fin = io.StringIO()
-            df_fin.to_csv(buf_fin, index=False, sep=";")
+            excel_fin = export_to_excel_bytes(df_fin, "Dekretacja_FV")
+            csv_fin = export_to_excel_compatible_csv(df_fin)
             ksef_xml_str = generate_ksef_xml(res)
+            safe_doc_name = res.get('Numer_Faktury', 'dokument').replace('/', '_').replace('\\', '_')
 
-            dl1, dl2 = st.columns(2)
+            dl1, dl2, dl3 = st.columns(3)
             with dl1:
                 st.download_button(
-                    "📥 Eksportuj rekord dekretacyjny do ERP (CSV)",
-                    data=buf_fin.getvalue(),
-                    file_name=f"audyt_{res.get('Numer_Faktury', 'dokument').replace('/', '_')}.csv",
-                    mime="text/csv",
+                    "📊 Pobierz Arkusz Excel (.xlsx)",
+                    data=excel_fin,
+                    file_name=f"audyt_{safe_doc_name}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
             with dl2:
                 st.download_button(
-                    "🏛️ Pobierz ustrukturyzowany plik e-Faktury KSeF XML FA(2)",
+                    "📥 Pobierz CSV dla Excela / ERP (.csv)",
+                    data=csv_fin,
+                    file_name=f"audyt_{safe_doc_name}.csv",
+                    mime="text/csv; charset=utf-8",
+                    use_container_width=True
+                )
+            with dl3:
+                st.download_button(
+                    "🏛️ Pobierz e-Fakturę KSeF XML FA(2)",
                     data=ksef_xml_str,
-                    file_name=f"KSeF_FA2_{res.get('Numer_Faktury', 'dokument').replace('/', '_')}.xml",
+                    file_name=f"KSeF_FA2_{safe_doc_name}.xml",
                     mime="application/xml",
                     use_container_width=True
                 )
@@ -461,8 +492,38 @@ with tab_hr:
             st.divider()
             st.markdown("### ⚖️ Karta Zgodności z AI Act (Nadzór Człowieka)")
             ai_info = res_hr.get("AI_Act_Compliance", {})
-            st.info(f"**Klasyfikacja wg AI Act:** {ai_info.get('Kategoria_Ryzyka', 'Wysokie Ryzyko (High-Risk AI)')} — {ai_info.get('Rekomendacja')}")
             st.checkbox("Podpis i autoryzacja kadrowca (Human-in-the-Loop Approval)", value=True)
+
+            st.markdown("#### Raport Audytu HR & Ochrony Danych (Eksport)")
+            df_hr_export = pd.DataFrame([{
+                "Typ_Dokumentu": res_hr.get("Typ_Dokumentu"),
+                "Czesc_eTeczki": res_hr.get("Czesc_eTeczki"),
+                "PESEL": res_hr.get("PESEL_Pracownika"),
+                "Walidacja_PESEL": res_hr.get("Walidacja_PESEL"),
+                "Alert_PIP": res_hr.get("Status_PIP"),
+                "Liczba_Incydentow_RODO": res_hr.get("Liczba_Incydentow_RODO"),
+                "Okres_Retencji": res_hr.get("Wymagany_Okres_Retencji")
+            }])
+            excel_hr = export_to_excel_bytes(df_hr_export, "Audyt_HR_RODO")
+            csv_hr = export_to_excel_compatible_csv(df_hr_export)
+
+            c_hr_d1, c_hr_d2 = st.columns(2)
+            with c_hr_d1:
+                st.download_button(
+                    "📊 Pobierz Protokół HR do Excela (.xlsx)",
+                    data=excel_hr,
+                    file_name="protokol_audytu_hr.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            with c_hr_d2:
+                st.download_button(
+                    "📥 Pobierz Raport RODO/PIP (.csv dla Excela)",
+                    data=csv_hr,
+                    file_name="protokol_audytu_hr.csv",
+                    mime="text/csv; charset=utf-8",
+                    use_container_width=True
+                )
 
 # =============================================================
 # MODUŁ 4: LOGISTYKA, TRANSPORT & CMR/ADR (O2C)
@@ -520,6 +581,37 @@ with tab_logistics:
                 st.markdown("#### Wykryte substancje podlegające Konwencji ADR i nadzorowi PUESC:")
                 st.table(pd.DataFrame(kody))
 
+            st.markdown("#### Raport Zgodności Przewozowej & Podatkowej WDT (Eksport)")
+            df_log_export = pd.DataFrame([{
+                "Numer_CMR": res_log.get("Numer_CMR"),
+                "Nadawca": res_log.get("Nadawca"),
+                "Odbiorca": res_log.get("Odbiorca"),
+                "Status_WDT_0_VAT": res_log.get("Status_Potwierdzenia_WDT_0_VAT"),
+                "Status_ADR": res_log.get("Status_ADR"),
+                "Status_SENT": res_log.get("Wykryty_Numer_SENT"),
+                "Stan_Przesylki": res_log.get("Status_Przesylki")
+            }])
+            excel_log = export_to_excel_bytes(df_log_export, "Audyt_Logistyka_CMR")
+            csv_log = export_to_excel_compatible_csv(df_log_export)
+
+            c_log_d1, c_log_d2 = st.columns(2)
+            with c_log_d1:
+                st.download_button(
+                    "📊 Pobierz Raport CMR/WDT do Excela (.xlsx)",
+                    data=excel_log,
+                    file_name="raport_cmr_wdt.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            with c_log_d2:
+                st.download_button(
+                    "📥 Pobierz Raport CMR/WDT (.csv dla Excela)",
+                    data=csv_log,
+                    file_name="raport_cmr_wdt.csv",
+                    mime="text/csv; charset=utf-8",
+                    use_container_width=True
+                )
+
 # =============================================================
 # MODUŁ 5: POLIGON DANYCH & OCZYSZCZANIE MAGAZYNU (LEGACY DATA)
 # =============================================================
@@ -575,15 +667,27 @@ with tab_legacy:
                 st.markdown("#### Czysta, zwalidowana baza gotowa do importu do nowego systemu ERP:")
                 st.dataframe(cleaned_df, use_container_width=True)
 
-                # Eksport czystego pliku
-                csv_clean = io.StringIO()
-                cleaned_df.to_csv(csv_clean, index=False, sep=";")
-                st.download_button(
-                    "📥 Pobierz Oczyszczoną Bazę (Czysty CSV dla ERP)",
-                    data=csv_clean.getvalue(),
-                    file_name="baza_magazynowa_oczyszczona.csv",
-                    mime="text/csv"
-                )
+                # Eksport czystego pliku (Excel .xlsx + CSV zoptymalizowany dla polskiego Excela)
+                excel_clean = export_to_excel_bytes(cleaned_df, "Baza_Magazynowa_Czysta")
+                csv_clean = export_to_excel_compatible_csv(cleaned_df)
+
+                dl_leg1, dl_leg2 = st.columns(2)
+                with dl_leg1:
+                    st.download_button(
+                        "📊 Pobierz Czysty Arkusz Excel (.xlsx)",
+                        data=excel_clean,
+                        file_name="baza_magazynowa_oczyszczona.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                with dl_leg2:
+                    st.download_button(
+                        "📥 Pobierz CSV dla Excela / ERP (.csv)",
+                        data=csv_clean,
+                        file_name="baza_magazynowa_oczyszczona.csv",
+                        mime="text/csv; charset=utf-8",
+                        use_container_width=True
+                    )
                 st.success("✅ Kartoteki zostały pomyślnie znormalizowane, przeliczone wartościowo i zabezpieczone przed błędami JPK_V7!")
 
 # =============================================================
@@ -593,7 +697,7 @@ with tab_compliance:
     st.subheader("Architektura Zgodności Prawnej & Certyfikaty Systemu")
     st.markdown("OptiDoc AI został zaprojektowany w oparciu o sztywne normy polskiego prawa gospodarczego i unijne regulacje technologiczne.")
     
-    c_tab1, c_tab2 = st.tabs(["🏛️ Akty Prawne w Silniku", "📚 Baza Wiedzy Referencyjnej"])
+    c_tab1, c_tab2, c_tab3 = st.tabs(["🏛️ Akty Prawne w Silniku", "📚 Baza Wiedzy Referencyjnej", "📖 Studium Przypadków & Menedżment BPM"])
     with c_tab1:
         for act in LEGAL_ACTS:
             st.markdown(f"**{act['act']}**")
@@ -604,6 +708,91 @@ with tab_compliance:
         st.caption("System wykorzystuje modele decyzyjne oparte na standardach doradztwa i audytu:")
         for book in BOOKS_COMPENDIUM:
             st.markdown(f"• **{book['title']}** ({book['author']}) — *{book['category']}*")
+
+    with c_tab3:
+        st.markdown("### 🏛️ Architektura Menedżmentu Procesami Biznesowymi (BPM) & Studium Przypadków")
+        st.caption("Praktyczne studium 12 przypadków biznesowych łączących prawo gospodarcze, procedury operacyjne (SOP) oraz cyfrowe bramki kontrolne (Decision Gates).")
+
+        bpm_col1, bpm_col2 = st.columns(2)
+        with bpm_col1:
+            st.markdown("#### 📦 Filar I: Finanse P2P & Podatki")
+            with st.expander("1. Usługi Gastronomiczne i Reprezentacja (NKUP)"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Błędne odliczenie VAT i wrzucenie w koszty faktur restauracyjnych zarządu.
+                - **Podstawa prawna:** Art. 16 ust. 1 pkt 28 CIT / Art. 23 ust. 1 pkt 23 PIT oraz Art. 88 ust. 1 pkt 4 VAT.
+                - **Bramka BPM:** Automatyczne zatrzymanie faktury; dekretacja 100% NKUP i 0% odliczenia VAT w planie kont.
+                """)
+            with st.expander("2. Samochód Osobowy w Użytku Mieszanym (50% VAT / 75% KUP)"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Błędy ręcznych wyliczeń proporcji kosztów eksploatacji floty.
+                - **Podstawa prawna:** Art. 86a ust. 1 i 2 VAT (odliczenie 50% VAT) oraz Art. 16 ust. 1 pkt 51 CIT / Art. 23 ust. 1 pkt 46 PIT (75% KUP sumy Netto + nieodliczony VAT).
+                - **Bramka BPM:** Automatyczny split 3-liniowy w ERP bez udziału człowieka.
+                """)
+            with st.expander("3. Blokada Księgowania Proformy"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Zaksięgowanie proformy jako kosztu i odliczenie VAT (zagrożenie sankcją nierzetelnego dowodu).
+                - **Podstawa prawna:** Art. 106b VAT oraz Art. 21 i 22 ustawy o rachunkowości.
+                - **Bramka BPM (Gatekeeper):** Twarda blokada (Hard Stop) w obiegu OCR i żądanie właściwej e-Faktury.
+                """)
+            with st.expander("4. Sprzęt IT > 15 000 PLN (Split Payment & GTU-06)"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Zapłata zwykłym przelewem zamiast MPP za towary wrażliwe (sankcja 30% VAT).
+                - **Podstawa prawna:** Art. 108a ust. 1a i ust. 7 VAT oraz Rozporządzenie JPK_V7 (kod GTU-06).
+                - **Bramka BPM:** Blokada zwykłego przelewu w bankowości; wymuszenie transferu na subkonto VAT.
+                """)
+            with st.expander("5. 3-Way Matching (Rozbieżność Magazynowa PZ vs Faktura)"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Zapłata za 500 szt., gdy magazyn przyjął tylko 450 szt. (nadpłata 1 845 PLN brutto).
+                - **Podstawa prawna:** Art. 88 ust. 3a pkt 4 lit. a VAT (zakaz odliczenia dla niedostarczonych towarów), Art. 15 ust. 1 CIT oraz KSR nr 4 (Zapasy).
+                - **Bramka BPM:** Trójstronne uzgodnienie PO ↔ PZ ↔ FV; blokada płatności za brakujące 50 szt.
+                """)
+            with st.expander("6. Anti-Fraud: Fałszywy NIP, Błąd Rachunkowy & Biała Lista"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Wyłudzenia podatkowe, puste faktury, płatność na konto spoza wykazu MF.
+                - **Podstawa prawna:** Algorytm wagi mod 11 NIP, Art. 96b VAT oraz Art. 117ba Ordynacji podatkowej (odpowiedzialność solidarna).
+                - **Bramka BPM:** Algorytmiczna weryfikacja sumy kontrolnej NIP i 26 cyfr NRB przed wysłaniem przelewu.
+                """)
+
+        with bpm_col2:
+            st.markdown("#### 👥 Filar II: Kadry HR, BHP & RODO")
+            with st.expander("7. Cyfrowa e-Teczka (Części A, B, C, D, E) & Retencja"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Mieszanie kar porządkowych z umowami; brak usuwania kar po roku (mandat PIP).
+                - **Podstawa prawna:** Rozporządzenie MRiPS ws. dokumentacji pracowniczej oraz Art. 113 § 1 Kodeksu Pracy.
+                - **Bramka BPM:** Automatyczna segregacja akt do części A–E z ustawowym licznikiem retencji.
+                """)
+            with st.expander("8. Anonimizacja Danych Wrażliwych i Dowodów (RODO)"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Kserowanie dowodów osobistych, nielegalne żądanie KRK, diagnozy lekarskie.
+                - **Podstawa prawna:** Art. 5 ust. 1 lit. c i Art. 9 RODO oraz Art. 22¹ Kodeksu Pracy.
+                - **Bramka BPM (Privacy by Design):** Automatyczna redakcja numeru dowodu i tajemnicy lekarskiej przed zapisem w chmurze.
+                """)
+            with st.expander("9. Doba Pracownicza i Bezpieczeństwo Pracy (PIP Compliance)"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Złamanie 11h odpoczynku dobowego w grafiku; praca z przeterminowanym badaniem.
+                - **Podstawa prawna:** Art. 128 § 3 pkt 1 KP, Art. 132 § 1 KP oraz Art. 229 § 4 KP (grzywny do 30 000 PLN).
+                - **Bramka BPM:** Prewencyjny alert blokujący grafik pracy i ostrzegający przed karą PIP.
+                """)
+
+            st.markdown("#### 🚚 Filar III & IV: Logistyka, SENT & Data Governance")
+            with st.expander("10. List Przewozowy CMR: Pole 24 a Stawka 0% VAT (WDT)"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Brak podpisu/pieczęci odbiorcy unijnego w Polu 24 (konieczność dopłaty 23% VAT).
+                - **Podstawa prawna:** Art. 42 ust. 1, 3 i 4 ustawy o VAT oraz Konwencja CMR.
+                - **Bramka BPM:** Inspekcja skanu Pola 24; utworzenie rezerwy na VAT 23% przy braku dowodu dostawy.
+                """)
+            with st.expander("11. Transport Towarów Wrażliwych ADR i SENT (PUESC)"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Przewóz paliw/chemikaliów (UN 1202/1203) bez numeru SENT (kara 46% wartości, min. 20 000 PLN).
+                - **Podstawa prawna:** Ustawa o systemie monitorowania drogowego (SENT) oraz Umowa europejska ADR.
+                - **Bramka BPM:** Weryfikacja aktywnego zgłoszenia PUESC przed wyjazdem transportu z bazy.
+                """)
+            with st.expander("12. Oczyszczanie Bazy Magazynowej ze Starych Systemów"):
+                st.markdown("""
+                - **Procedura / Ryzyko:** Zabałaganione kartoteki z DOS-a/Excela uniemożliwiające migrację do nowego ERP i generowanie JPK_V7.
+                - **Podstawa prawna:** Art. 26 ustawy o rachunkowości oraz wymogi struktury logicznej JPK_V7.
+                - **Bramka BPM:** Pipeline standaryzacji typów danych, usuwania błędów w NIP i kalkulacji wyceny zapasów.
+                """)
 
 st.divider()
 st.caption(f"OptiDoc AI Enterprise Edition v2.5 • Bezpieczne Środowisko Certyfikowane • Sesja aktywna: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
