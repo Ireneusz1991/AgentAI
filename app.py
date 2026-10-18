@@ -2,20 +2,64 @@ import streamlit as st
 import pandas as pd
 import json
 import io
+import re
+import importlib
 from datetime import datetime
 
-# Import silników domenowych
-from engine.finance_engine import (
-    analyze_finance_document_offline,
-    analyze_finance_document_llm,
-    generate_ksef_xml
-)
-from engine.hr_engine import analyze_hr_document_offline, analyze_hr_document_llm
-from engine.logistics_engine import analyze_logistics_document_offline, analyze_logistics_document_llm
-from engine.data_cleaner_engine import clean_and_modernize_legacy_data
-from engine.compendium_data import BOOKS_COMPENDIUM, LEGAL_ACTS
-from data.sample_documents import SAMPLE_DOCUMENTS
-from data.messy_sample_data import MESSY_WAREHOUSE_CSV
+# Wymuszenie przeładowania modułów z dysku (zapobiega błędowi ImportError w pamięci podręcznej Streamlit Cloud po aktualizacji na GitHubie)
+import engine.finance_engine as _fin_mod
+try:
+    importlib.reload(_fin_mod)
+except Exception:
+    pass
+
+import engine.hr_engine as _hr_mod
+import engine.logistics_engine as _log_mod
+import engine.data_cleaner_engine as _clean_mod
+import engine.compendium_data as _comp_mod
+import data.sample_documents as _doc_mod
+import data.messy_sample_data as _messy_mod
+
+for _m in (_hr_mod, _log_mod, _clean_mod, _comp_mod, _doc_mod, _messy_mod):
+    try:
+        importlib.reload(_m)
+    except Exception:
+        pass
+
+analyze_finance_document_offline = _fin_mod.analyze_finance_document_offline
+analyze_finance_document_llm = _fin_mod.analyze_finance_document_llm
+
+
+def _fallback_ksef_xml(data: dict) -> str:
+    now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns="http://crd.gov.pl/wzor/2023/06/29/12648/">
+  <Naglowek>
+    <KodFormularza kodSystemowy="FA (2)" wersjaSchemy="1-0E">FA</KodFormularza>
+    <WariantFormularza>2</WariantFormularza>
+    <DataWytworzeniaFa>{now_iso}</DataWytworzeniaFa>
+    <SystemInfo>OptiDoc AI Enterprise v2.5</SystemInfo>
+  </Naglowek>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_2>{data.get('Numer_Faktury', 'FV/2026')}</P_2>
+    <P_13_1>{data.get('Kwota_Netto', 0.0):.2f}</P_13_1>
+    <P_14_1>{data.get('Kwota_VAT', 0.0):.2f}</P_14_1>
+    <P_15>{data.get('Kwota_Brutto', 0.0):.2f}</P_15>
+  </Fa>
+</Faktura>"""
+
+
+generate_ksef_xml = getattr(_fin_mod, "generate_ksef_xml", _fallback_ksef_xml)
+analyze_hr_document_offline = _hr_mod.analyze_hr_document_offline
+analyze_hr_document_llm = _hr_mod.analyze_hr_document_llm
+analyze_logistics_document_offline = _log_mod.analyze_logistics_document_offline
+analyze_logistics_document_llm = _log_mod.analyze_logistics_document_llm
+clean_and_modernize_legacy_data = _clean_mod.clean_and_modernize_legacy_data
+BOOKS_COMPENDIUM = _comp_mod.BOOKS_COMPENDIUM
+LEGAL_ACTS = _comp_mod.LEGAL_ACTS
+SAMPLE_DOCUMENTS = _doc_mod.SAMPLE_DOCUMENTS
+MESSY_WAREHOUSE_CSV = _messy_mod.MESSY_WAREHOUSE_CSV
 
 # -------------------------------------------------------------
 # 1. KONFIGURACJA STRONY & STYLING ENTERPRISE
