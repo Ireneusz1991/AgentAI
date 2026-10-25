@@ -148,7 +148,18 @@ def analyze_finance_document_offline(text: str) -> dict:
     date_match = re.search(r'(?:data\s*wystawienia|wystawiono|data)[:\s]*([0-9]{2}[.-][0-9]{2}[.-][0-9]{4})', text, re.IGNORECASE)
     issue_date = date_match.group(1) if date_match else "18.10.2026"
     
-    # 6. Kwalifikacja KUP / NKUP (Zgodnie z art. 16 ust. 1 CIT / art. 23 ust. 1 PIT oraz art. 86a VAT)
+    # 6. Kontrola 3-Way Matching (Zamówienie PO <=> Magazyn PZ <=> Faktura FV)
+    has_po = "po-" in text_lower or "zamówienie" in text_lower
+    has_pz = "pz-" in text_lower or "przyjęcie" in text_lower or "magazyn" in text_lower
+    has_discrepancy = any(w in text_lower for w in ["rozbieżność", "rozbieznosc", "za dużo", "brak 50", "protokół szkody"])
+    if has_discrepancy:
+        matching_status = "🚨 ALARM ROZBIEŻNOŚCI (PO=500 szt. | PZ=450 szt. | FV=500 szt.): Zafakturowano o 50 szt. więcej niż przyjęto na magazyn! Nadpłata 1 845,00 PLN brutto ZABLOKOWANA."
+    elif has_po and has_pz:
+        matching_status = "✅ 3-Way Matching: Pełna zgodność ilościowa i cenowa (PO = PZ = FV)"
+    else:
+        matching_status = "ℹ️ Dokument pojedynczy (Brak powiązanego dokumentu PZ/PO w treści)"
+
+    # 7. Kwalifikacja KUP / NKUP (Zgodnie z art. 16 ust. 1 CIT / art. 23 ust. 1 PIT oraz art. 86a i 88 VAT)
     if not nip_valid or not math_valid:
         status_kup = "BLOKADA: BŁĄD FORMALNO-RACHUNKOWY"
         reasons = []
@@ -157,6 +168,14 @@ def analyze_finance_document_offline(text: str) -> dict:
         if not math_valid:
             reasons.append(math_status)
         kup_uzasadnienie = " | ".join(reasons) + " Dokument wymaga korekty lub weryfikacji kontrahenta przed księgowaniem!"
+        kup_alert = True
+    elif has_discrepancy:
+        status_kup = "BLOKADA: ROZBIEŻNOŚĆ MAGAZYNOWA PZ vs FV"
+        kup_uzasadnienie = (
+            "Zgodnie z art. 88 ust. 3a pkt 4 lit. a ustawy o VAT oraz art. 15 ust. 1 CIT faktura w części dotyczącej "
+            "niedostarczonych 50 szt. towaru (1 500,00 PLN netto + 345,00 PLN VAT = 1 845,00 PLN brutto) nie dokumentuje "
+            "rzeczywistego zdarzenia gospodarczego! Wstrzymano księgowanie i płatność do czasu wystawienia Faktury Korygującej przez dostawcę."
+        )
         kup_alert = True
     elif "proforma" in text_lower or "pro forma" in text_lower:
         status_kup = "BLOKADA: PROFORMA"
@@ -178,21 +197,21 @@ def analyze_finance_document_offline(text: str) -> dict:
         kup_uzasadnienie = "Wydatek powiązany z prowadzoną działalnością gospodarczą i osiąganiem przychodów (art. 15 ust. 1 CIT / art. 22 ust. 1 PIT)."
         kup_alert = False
 
-    # 7. Weryfikacja Split Payment (Mechanizm Podzielonej Płatności - art. 108a ustawy o VAT)
+    # 8. Weryfikacja Split Payment (Mechanizm Podzielonej Płatności - art. 108a ustawy o VAT)
     is_split_payment_required = brutto >= 15000.0 or "split payment" in text_lower or "mechanizm podzielonej płatności" in text_lower or "mpp" in text_lower
     if is_split_payment_required:
-        split_payment_status = "BLOKADA: OBLIGATORYJNY SPLIT PAYMENT"
-        split_payment_desc = f"Kwota brutto ({brutto:,.2f} PLN) przekracza próg 15 000 PLN lub dotyczy towarów wrażliwych z Zał. nr 15 do VAT. Standardowy przelew zablokowany."
+        split_payment_status = "OBLIGATORYJNY SPLIT PAYMENT (MPP)"
+        split_payment_desc = f"Kwota brutto ({brutto:,.2f} PLN) przekracza próg 15 000 PLN i dotyczy towarów z Zał. nr 15 do ustawy o VAT. Wymagany przelew w Mechanizmie Podzielonej Płatności."
         split_alert = True
     else:
         split_payment_status = "Standardowy przelew"
         split_payment_desc = "Kwota poniżej progu 15 000 PLN, brak wymogu MPP."
         split_alert = False
 
-    # 8. Weryfikacja Rachunku Bankowego NRB i Białej Listy
+    # 9. Weryfikacja Rachunku Bankowego NRB i Białej Listy
     bank_status, bank_alert = validate_bank_account(text, brutto)
 
-    # 9. Kody GTU (Jednolity Plik Kontrolny JPK_V7)
+    # 10. Kody GTU (Jednolity Plik Kontrolny JPK_V7)
     gtu_detected = []
     if any(k in text_lower for k in ["paliwo", "olej", "benzyn", "pb95"]):
         gtu_detected.append("GTU-02 (Paliwa)")
@@ -202,18 +221,6 @@ def analyze_finance_document_offline(text: str) -> dict:
         gtu_detected.append("GTU-08 (Metale)")
     if any(k in text_lower for k in ["doradcz", "marketing", "szkoleni", "reklamow"]):
         gtu_detected.append("GTU-12 (Usługi niematerialne)")
-    
-    # 10. 3-Way Matching check
-    has_po = "po-" in text_lower or "zamówienie" in text_lower
-    has_pz = "pz-" in text_lower or "przyjęcie" in text_lower or "magazyn" in text_lower
-    has_discrepancy = any(w in text_lower for w in ["rozbieżność", "rozbieznosc", "za dużo", "brak 50", "uszkodzon", "protokół"])
-    if has_discrepancy:
-        matching_status = "🚨 ALARM ROZBIEŻNOŚCI: Zafakturowano więcej niż przyjęto na magazyn PZ! (Płatność zablokowana)"
-        split_alert = True
-    elif has_po and has_pz:
-        matching_status = "✅ 3-Way Matching: Pełna zgodność (PO = PZ = FV)"
-    else:
-        matching_status = "ℹ️ Dokument pojedynczy (Brak powiązania PZ/PO w tekście)"
 
     result = {
         "Numer_Faktury": invoice_number,

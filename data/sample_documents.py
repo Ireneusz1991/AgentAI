@@ -137,7 +137,8 @@ Pozycja: Profil stalowy 40x40x2, Ilość na fakturze: 500 sztuk (ZAFAKTUROWANO Z
 Wartość Netto: 15 000,00 PLN
 Stawka VAT: 23%
 Kwota VAT: 3 450,00 PLN
-Wartość Brutto: 18 450,00 PLN"""
+Wartość Brutto: 18 450,00 PLN
+Numer rachunku: 88 1020 1013 0000 1122 3344 5566"""
     },
 
     "HR_UMOWA_RODO": {

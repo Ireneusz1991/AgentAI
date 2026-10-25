@@ -10,7 +10,19 @@ Automatycznie porządkuje 'brudne' pliki ze starych systemów ERP/magazynowych:
 import pandas as pd
 import re
 from datetime import datetime
-from engine.finance_engine import validate_nip_checksum
+
+try:
+    from engine.finance_engine import validate_nip_checksum
+except ImportError:
+    def validate_nip_checksum(nip_raw: str) -> tuple[bool, str]:
+        digits = re.sub(r'[^0-9]', '', str(nip_raw))
+        if len(digits) != 10:
+            return False, f"Błędna długość NIP ({len(digits)} cyfr)"
+        weights = [6, 5, 7, 2, 3, 4, 5, 6, 7]
+        checksum = sum(int(digits[i]) * weights[i] for i in range(9)) % 11
+        if checksum == 10 or checksum != int(digits[9]):
+            return False, f"BŁĄD SUMY KONTROLNEJ NIP ({digits})"
+        return True, f"Poprawny NIP ({digits})"
 
 
 def clean_amount(val) -> float:
