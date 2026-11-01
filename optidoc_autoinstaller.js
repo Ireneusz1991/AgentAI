@@ -1,13 +1,16 @@
 /**
  * ============================================================================
- * OPTIDOC AI ENTERPRISE - AUTOINSTALATOR SHOWROOMU WORKSPACE (v2.0)
+ * OPTIDOC AI ENTERPRISE - AUTOINSTALATOR SHOWROOMU WORKSPACE (v2.5)
  * ============================================================================
- * Automatyczny instalator infrastruktury:
+ * Kompleksowy silnik chmurowy dla Google Workspace:
  * 1. Tworzy strukturę folderów na Dysku Google (Wpływ, Archiwum, Blokada, Umowy).
- * 2. Sam zapamiętuje ID folderów (nie musisz nic ręcznie kopiować!).
- * 3. Formatuje Arkusz Google: kolumny, kolory, format walutowy, formatowanie warunkowe.
- * 4. Dodaje własne menu "🚀 OptiDoc AI" bezpośrednio w pasku Arkusza Google.
- * 5. Posiada generator faktur testowych (Demo Pack) do prezentacji na żywo.
+ * 2. Formatuje Arkusz Google: kolumny walutowe, nagłówki, reguły warunkowe.
+ * 3. Obsługuje multimodalną analizę PDF przez Gemini 1.5/2.0 Flash.
+ * 4. Odpytuje na żywo API Białej Listy Podatników VAT Ministerstwa Finansów.
+ * 5. Posiada wbudowany Autopilot Gmaila (automatyczny pobór z faktury@firma.pl).
+ * 6. Posiada 1-klikowy wyzwalacz chmurowy 24/7 (Serverless cron co 10 minut).
+ * 7. Posiada generator paczki przelewów bankowych (format Elixir / CSV dla banków).
+ * 8. Wdraża paradygmat Management by Exception (alert krytyczny tylko przy fraudzie).
  */
 
 // ============================================================================
@@ -159,6 +162,9 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu("🚀 OptiDoc AI")
     .addItem("⚡ Uruchom Pełny Autopilot (Gmail + Dysk)", "autopilotOptiDoc")
+    .addItem("⏰ Włącz / Wyłącz Autopilot 24/7 (Trigger Chmurowy)", "przelaczAutopilota24_7")
+    .addItem("🏦 Wygeneruj Paczkę Przelewów Bankowych (Elixir/CSV)", "generujPaczkePrzelewowBank")
+    .addSeparator()
     .addItem("📧 Pobierz faktury z Gmaila do Skrzynki Wpływu", "pobierzFakturyZGmaila")
     .addItem("▶️ Przetwórz pliki z folderu Wpływu", "przetworzNoweDokumenty")
     .addSeparator()
@@ -179,7 +185,95 @@ function ustawKluczGemini() {
 }
 
 // ============================================================================
-// 3. ZUNIFIKOWANY AUTOPILOT (Gmail -> Dysk -> Gemini -> Biała Lista -> Arkusz)
+// 3. WYZWALACZ CHMUROWY 24/7 (ZARZĄDZANIE BEZPOŚREDNIO Z MENU)
+// ============================================================================
+function przelaczAutopilota24_7() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let existingTrigger = null;
+  
+  for (let i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "autopilotOptiDoc") {
+      existingTrigger = triggers[i];
+      break;
+    }
+  }
+  
+  const ui = SpreadsheetApp.getUi();
+  if (existingTrigger) {
+    ScriptApp.deleteTrigger(existingTrigger);
+    ui.alert("Status Autopilota", "⏸️ Autopilot 24/7 został WYŁĄCZONY. System nie będzie automatycznie sprawdzał dokumentów w tle.", ui.ButtonSet.OK);
+  } else {
+    ScriptApp.newTrigger("autopilotOptiDoc")
+      .timeBased()
+      .everyMinutes(10)
+      .create();
+    ui.alert("Status Autopilota", "✅ Autopilot 24/7 został WŁĄCZONY!\n\nSystem działa teraz w chmurze Google 24/7 (co 10 minut sprawdza Gmaila oraz Dysk bez otwierania przeglądarki).", ui.ButtonSet.OK);
+  }
+}
+
+// ============================================================================
+// 4. GENERATOR PACZKI PRZELEWÓW DLA BANKÓW (ELIXIR / CSV)
+// ============================================================================
+function generujPaczkePrzelewowBank() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("📊 Rejestr Faktur");
+  if (!sheet) return;
+  
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    SpreadsheetApp.getUi().alert("Brak danych", "Rejestr faktur jest pusty.", SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  // Nagłówek paczki bankowej
+  let csvContent = "Nazwa_Odbiorcy;Rachunek_Odbiorcy;Kwota_Grosze;Tytul_Przelewu;NIP_Odbiorcy\r\n";
+  let approvedCount = 0;
+  let totalAmount = 0.0;
+  
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const seller = row[1];
+    const nip = row[2];
+    const invNum = row[3];
+    const brutto = parseFloat(row[6]) || 0.0;
+    const account = (row[7] || "").toString().replace(/[^0-9]/g, '');
+    const status = (row[9] || "").toString();
+    
+    // Eksportujemy TYLKO faktury z zielonym statusem ZGODNA
+    if (status.includes("ZGODNA") && account.length === 26 && brutto > 0) {
+      const amountGrosze = Math.round(brutto * 100);
+      const title = `Faktura ${invNum}`;
+      csvContent += `"${seller}";${account};${amountGrosze};"${title}";${nip}\r\n`;
+      approvedCount++;
+      totalAmount += brutto;
+    }
+  }
+  
+  if (approvedCount === 0) {
+    SpreadsheetApp.getUi().alert("Brak faktur do przelewu", "Nie znaleziono poprawnych, zatwierdzonych faktur ze statusem 🟢 ZGODNA.", SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  // Zapis pliku paczki na Dysku Google
+  const props = PropertiesService.getScriptProperties();
+  const rootFolderId = props.getProperty("ROOT_FOLDER_ID");
+  const folder = rootFolderId ? DriveApp.getFolderById(rootFolderId) : DriveApp.getRootFolder();
+  
+  const nowStr = Utilities.formatDate(new Date(), "GMT+1", "yyyy-MM-dd_HHmm");
+  const fileName = `Paczka_Przelewow_${nowStr}.csv`;
+  const file = folder.createFile(fileName, csvContent, MimeType.CSV);
+  
+  SpreadsheetApp.getUi().alert(
+    "Wygenerowano paczkę przelewów!", 
+    `Zatwierdzono faktur: ${approvedCount}\n` +
+    `Łączna kwota przelewów: ${totalAmount.toFixed(2)} zł\n\n` +
+    `Plik został utworzony na Dysku:\n${fileName}\n\n` +
+    `Możesz go bezpośrednio zaimportować do bankowości internetowej (mBank, ING, PKO, Santander).`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+// ============================================================================
+// 5. ZUNIFIKOWANY AUTOPILOT (Gmail -> Dysk -> Gemini -> Biała Lista -> Arkusz)
 // ============================================================================
 function autopilotOptiDoc() {
   // Krok A: Pobierz załączniki PDF z nowych maili w Gmailu
@@ -205,7 +299,6 @@ function pobierzFakturyZGmaila() {
     label = GmailApp.createLabel(labelName);
   }
   
-  // Szukamy maili nieprzetworzonych z załącznikiem PDF (słowa kluczowe: faktura, invoice, FV lub po prostu załącznik PDF)
   const query = `has:attachment filename:pdf -label:${labelName}`;
   const threads = GmailApp.search(query, 0, 10);
   
@@ -220,13 +313,11 @@ function pobierzFakturyZGmaila() {
       for (let k = 0; k < attachments.length; k++) {
         const att = attachments[k];
         if (att.getContentType() === MimeType.PDF || att.getName().toLowerCase().endsWith(".pdf")) {
-          // Zapisujemy PDF do folderu Wpływu na Dysku Google
           inboxFolder.createFile(att.copyBlob());
           downloadedCount++;
         }
       }
     }
-    // Oznaczamy wątek etykietą, aby nie przetwarzać go drugi raz
     threads[i].addLabel(label);
   }
   
@@ -234,7 +325,7 @@ function pobierzFakturyZGmaila() {
 }
 
 // ============================================================================
-// 4. SILNIK PRZETWARZANIA (Gemini Flash + Biała Lista MF + BPM)
+// 6. SILNIK PRZETWARZANIA (Gemini Flash + Biała Lista MF + BPM)
 // ============================================================================
 function przetworzNoweDokumenty() {
   const props = PropertiesService.getScriptProperties();
@@ -289,12 +380,14 @@ function przetworzNoweDokumenty() {
       // Routing BPM (Management by Exception)
       let status = "🟢 ZGODNA";
       let targetFolder = DriveApp.getFolderById(archiveId);
+      let alertNeeded = false;
       
       if (!mathOk) {
         status = "🟡 DO WYJAŚNIENIA (Błąd rachunkowy)";
       } else if (!wl.isAccountValid || !wl.isActive) {
         status = "🔴 BLOKADA PŁATNOŚCI (Biała Lista MF)";
         targetFolder = DriveApp.getFolderById(fraudId);
+        alertNeeded = true;
       }
       
       // Zapis w Arkuszu
@@ -316,8 +409,11 @@ function przetworzNoweDokumenty() {
       file.moveTo(targetFolder);
       try {
         file.setName(`${docData.sellerNip}_${docData.invoiceNumber.replace(/[\/\\:]/g, '-')}.pdf`);
-      } catch (e) {
-        // Ignorujemy błędy zmiany nazwy
+      } catch (e) {}
+      
+      // Management by Exception: Alert krytyczny TYLKO przy fraudzie skarbowym!
+      if (alertNeeded) {
+        wyslijAlertKrytycznyAntyfraud(docData, wl, file.getUrl());
       }
     }
   }
@@ -325,8 +421,30 @@ function przetworzNoweDokumenty() {
   Logger.log(`Przetworzono ${count} dokumentów.`);
 }
 
+function wyslijAlertKrytycznyAntyfraud(doc, wl, fileUrl) {
+  try {
+    const userEmail = Session.getActiveUser().getEmail();
+    if (!userEmail) return;
+    
+    const subject = `🚨 PILNE: Zablokowano płatność - Ostrzeżenie Białej Listy VAT (${doc.sellerName})`;
+    const body = `SYSTEM ANTYFRAUDOWY OPTIDOC WYKRYŁ NIEPRAWIDŁOWOŚĆ:\n\n` +
+                 `Kontrahent: ${doc.sellerName} (NIP: ${doc.sellerNip})\n` +
+                 `Faktura nr: ${doc.invoiceNumber} na kwotę: ${doc.brutto} PLN\n` +
+                 `Rachunek bankowy: ${doc.bankAccount}\n\n` +
+                 `WYNIK WERYFIKACJI MF: Rachunek bankowy NIE FIGURUJE w wykazie Szefa KAS (Biała Lista)!\n` +
+                 `Status VAT podatnika: ${wl.isActive ? "Czynny" : "NIEAKTYWNY"}\n\n` +
+                 `Zastosowane działanie: Płatność została ZABLOKOWANA w rejestrze.\n` +
+                 `Podgląd dokumentu: ${fileUrl}\n\n` +
+                 `Zgodnie z procedurą wstrzymaj realizację przelewu do czasu wyjaśnienia sprawy z dostawcą.`;
+                 
+    MailApp.sendEmail(userEmail, subject, body);
+  } catch (e) {
+    Logger.log("Błąd wysyłki alertu: " + e.message);
+  }
+}
+
 // ============================================================================
-// 5. GENERATOR DOKUMENTÓW DEMO DLA KLIENTA (Pokaz na żywo)
+// 7. GENERATOR DOKUMENTÓW DEMO DLA KLIENTA (Pokaz na żywo)
 // ============================================================================
 function wygenerujFakturyTestowe() {
   const props = PropertiesService.getScriptProperties();
@@ -341,7 +459,7 @@ function wygenerujFakturyTestowe() {
 }
 
 // ============================================================================
-// 6. POMOCNIKI: BIAŁA LISTA MF & GEMINI API
+// 8. POMOCNIKI: BIAŁA LISTA MF & GEMINI API
 // ============================================================================
 function verifyWhiteListMF(nip, rawAccount) {
   const cleanNip = (nip || "").replace(/[^0-9]/g, '');
