@@ -19,8 +19,9 @@ import engine.data_cleaner_engine as _clean_mod
 import engine.compendium_data as _comp_mod
 import data.sample_documents as _doc_mod
 import data.messy_sample_data as _messy_mod
+import engine.bielik_engine as _bielik_mod
 
-for _m in (_hr_mod, _log_mod, _clean_mod, _comp_mod, _doc_mod, _messy_mod):
+for _m in (_hr_mod, _log_mod, _clean_mod, _comp_mod, _doc_mod, _messy_mod, _bielik_mod):
     try:
         importlib.reload(_m)
     except Exception:
@@ -213,13 +214,14 @@ with st.sidebar:
 # -------------------------------------------------------------
 # 3. GŁÓWNA NAWIGACJA KOMERCYJNA
 # -------------------------------------------------------------
-tab_exec, tab_finance, tab_hr, tab_logistics, tab_legacy, tab_compliance = st.tabs([
+tab_exec, tab_finance, tab_hr, tab_logistics, tab_legacy, tab_compliance, tab_bielik = st.tabs([
     "📊 Panel Zarządczy & Oszczędności (ROI)",
     "📑 Weryfikacja Faktur & Podatków (P2P)",
     "👥 Cyfrowa e-Teczka & Ochrona Danych (HR)",
     "🚚 Logistyka & Kontrola Przewozów (CMR/ADR)",
     "🗃️ Poligon Danych: Magazyn & Excel",
-    "⚖️ Standardy Prawne & Certyfikacja"
+    "⚖️ Standardy Prawne & Certyfikacja",
+    "🦅 Suwerenny Silnik Bielik (Warszawa Cloud)"
 ])
 
 # =============================================================
@@ -793,6 +795,111 @@ with tab_compliance:
                 - **Podstawa prawna:** Art. 26 ustawy o rachunkowości oraz wymogi struktury logicznej JPK_V7.
                 - **Bramka BPM:** Pipeline standaryzacji typów danych, usuwania błędów w NIP i kalkulacji wyceny zapasów.
                 """)
+
+
+# =============================================================
+# MODUŁ 7: SUWERENNY SILNIK BIELIK (CLOUD SANDBOX WARSZAWA)
+# =============================================================
+with tab_bielik:
+    st.markdown('<div class="main-header">🦅 Suwerenny Silnik Bielik 11B v2.3</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Węzeł dedykowany Google Cloud Warszawa (europe-central2) • Pełna suwerenność danych (RODO / Data Residency)</div>', unsafe_allow_html=True)
+    
+    col_b1, col_b2, col_b3 = st.columns(3)
+    with col_b1:
+        st.markdown("""
+        <div class="kpi-card">
+            <div class="kpi-number">100% RODO</div>
+            <div class="kpi-label">Suwerenność Danych</div>
+            <span class="badge-success">Brak transferu poza Polskę</span>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_b2:
+        st.markdown("""
+        <div class="kpi-card">
+            <div class="kpi-number">Warszawa</div>
+            <div class="kpi-label">Lokalizacja Węzła Cloud</div>
+            <span class="badge-success">Google Cloud europe-central2</span>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_b3:
+        st.markdown("""
+        <div class="kpi-card">
+            <div class="kpi-number">11.2 B</div>
+            <div class="kpi-label">Parametry SpeakLeash / AGH</div>
+            <span class="badge-success">Specjalizacja w j. polskim</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("### 🔌 Konfiguracja i Monitor Węzła Chmurowego")
+    
+    col_cfg1, col_cfg2 = st.columns([2, 1])
+    with col_cfg1:
+        ollama_endpoint = st.text_input(
+            "Adres IP / URL węzła Ollama:",
+            value="http://34.116.170.183:11434",
+            help="Adres maszyny wirtualnej w Google Cloud Region Warszawa (europe-central2-a) lub serwera lokalnego."
+        )
+        selected_model = st.selectbox(
+            "Model językowy:",
+            ["hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M", "bielik:latest", "llama3:latest"],
+            index=0
+        )
+    with col_cfg2:
+        st.write("")
+        st.write("")
+        if st.button("🔍 Sprawdź Status Węzła Bielik", use_container_width=True):
+            with st.spinner("Odpytywanie węzła Ollama w Warszawie..."):
+                conn_res = _bielik_mod.test_bielik_connection(ollama_endpoint)
+                if conn_res["sukces"]:
+                    st.success(f"✅ {conn_res['komunikat']}")
+                else:
+                    st.error(f"❌ {conn_res['komunikat']}")
+
+    st.markdown("---")
+    
+    subtab_chat, subtab_extract = st.tabs(["💬 Autonomiczny Ekspert Prawno-Biznesowy", "📑 Ekstrakcja Danych Faktury do KSeF (JSON)"])
+    
+    with subtab_chat:
+        st.markdown("##### Zadaj pytanie Bielikowi (analiza prawa, procedur firmowych, umów)")
+        default_prompt = "Wymień 3 kluczowe korzyści dla polskiej firmy MŚP wynikające z wdrożenia suwerennego modelu AI (Bielik) zamiast zewnętrznych API z USA."
+        user_prompt = st.text_area("Zapytanie do modelu Bielik:", value=default_prompt, height=100)
+        
+        if st.button("🚀 Wyślij Zapytanie do Bielika", type="primary"):
+            with st.spinner("Bielik 11B przetwarza zapytanie w chmurze Warszawa..."):
+                try:
+                    resp_text = _bielik_mod.query_bielik(user_prompt, endpoint_url=ollama_endpoint, model_name=selected_model)
+                    st.markdown("#### 🦅 Odpowiedź modelu Bielik:")
+                    st.info(resp_text)
+                except Exception as e:
+                    st.error(f"Błąd komunikacji: {e}")
+
+    with subtab_extract:
+        st.markdown("##### Przetwarzanie i strukturyzacja dokumentu nieustrukturyzowanego")
+        doc_sample_bielik = st.text_area(
+            "Tekst dokumentu do analizy przez Bielika:",
+            value="""FAKTURA VAT NR: FV/2026/04/119
+Data wystawienia: 15.04.2026 r.
+Sprzedawca: TECH-SOLUTIONS SPÓŁKA Z O.O., ul. Prosta 10, 00-850 Warszawa
+NIP: 5252819342
+Nabywca: KOWALSKI TRANSPORT SP. K., ul. Przemysłowa 4, 30-001 Kraków
+NIP: 6762589123
+Pozycje:
+1. Usługi wdrożeniowe AI i audyt dokumentacji - 1 kpl. - 12 000,00 PLN netto, VAT 23% (2 760,00 PLN), Brutto: 14 760,00 PLN.
+Forma płatności: Przelew
+Termin płatności: 14 dni
+Numer konta do wpłaty: 12102010260000120200123456
+Uwagi: Mechanizm Podzielonej Płatności (MPP) - split payment.""",
+            height=200
+        )
+        
+        if st.button("⚡ Uruchom Ekstrakcję KSeF przez Bielika", type="primary"):
+            with st.spinner("Ekstrakcja encji biznesowych przez suwerenny silnik Bielik..."):
+                extracted = _bielik_mod.analyze_with_bielik(doc_sample_bielik, endpoint_url=ollama_endpoint, model_name=selected_model)
+                st.markdown("#### 📋 Wyodrębniona struktura JSON:")
+                st.json(extracted)
+                if "sprzedawca_nip" in extracted:
+                    nip_val = str(extracted.get("sprzedawca_nip", ""))
+                    st.success(f"Identyfikator NIP Sprzedawcy: `{nip_val}` | Gotowy do walidacji na Białej Liście VAT MF")
 
 st.divider()
 st.caption(f"OptiDoc AI Enterprise Edition v2.5 • Bezpieczne Środowisko Certyfikowane • Sesja aktywna: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
