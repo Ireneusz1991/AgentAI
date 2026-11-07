@@ -204,7 +204,11 @@ with st.sidebar:
     with st.expander("⚙️ Zaawansowane Ustawienia Systemu"):
         engine_type = st.radio(
             "Silnik analityczny:",
-            ["Wbudowany Deterministyczny Silnik Reguł i Algorytmów MŚP", "Hybrydowy Model Chmurowy (Gemini + Walidator Reguł)"],
+            [
+                "🦅 Suwerenny Model Bielik 11B (Google Cloud Warszawa)",
+                "Wbudowany Deterministyczny Silnik Reguł i Algorytmów MŚP",
+                "Hybrydowy Model Chmurowy (Gemini + Walidator Reguł)"
+            ],
             index=0
         )
         api_token = ""
@@ -327,7 +331,23 @@ with tab_finance:
 
     if btn_run_fin:
         with st.spinner("Trwa wielostopniowa walidacja matematyczna i podatkowa dokumentu..."):
-            if "Gemini" in engine_type and api_token:
+            if "Bielik" in engine_type:
+                bielik_data = _bielik_mod.analyze_with_bielik(fin_text)
+                res = analyze_finance_document_offline(fin_text)
+                if isinstance(bielik_data, dict) and "error" not in bielik_data:
+                    if bielik_data.get("sprzedawca_nip"):
+                        res["NIP_Sprzedawcy"] = str(bielik_data["sprzedawca_nip"])
+                    if bielik_data.get("numer_faktury"):
+                        res["Numer_Faktury"] = str(bielik_data["numer_faktury"])
+                    if bielik_data.get("kwota_brutto"):
+                        try:
+                            res["Kwota_Brutto"] = float(bielik_data["kwota_brutto"])
+                        except Exception:
+                            pass
+                    if bielik_data.get("rachunek_bankowy"):
+                        res["Rachunek_Bankowy"] = str(bielik_data["rachunek_bankowy"])
+                st.info("🦅 Zintegrowana analiza: Suwerenny Silnik Bielik 11B (Warszawa) + Algorytmiczny Walidator Reguł")
+            elif "Gemini" in engine_type and api_token:
                 res = analyze_finance_document_llm(fin_text, api_token)
             else:
                 res = analyze_finance_document_offline(fin_text)
@@ -841,7 +861,7 @@ with tab_bielik:
         )
         selected_model = st.selectbox(
             "Model językowy:",
-            ["hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M", "bielik:latest", "llama3:latest"],
+            ["bielik:latest", "llama3.2:3b", "hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M"],
             index=0
         )
     with col_cfg2:
@@ -857,21 +877,19 @@ with tab_bielik:
 
     st.markdown("---")
     
-    subtab_chat, subtab_extract = st.tabs(["💬 Autonomiczny Ekspert Prawno-Biznesowy", "📑 Ekstrakcja Danych Faktury do KSeF (JSON)"])
+    subtab_chat, subtab_extract = st.tabs(["💬 Autonomiczny Ekspert Prawno-Biznesowy (Live Stream)", "📑 Ekstrakcja Danych Faktury do KSeF (JSON)"])
     
     with subtab_chat:
-        st.markdown("##### Zadaj pytanie Bielikowi (analiza prawa, procedur firmowych, umów)")
+        st.markdown("##### Zadaj pytanie modelowi (analiza prawa, procedur firmowych, umów)")
         default_prompt = "Wymień 3 kluczowe korzyści dla polskiej firmy MŚP wynikające z wdrożenia suwerennego modelu AI (Bielik) zamiast zewnętrznych API z USA."
-        user_prompt = st.text_area("Zapytanie do modelu Bielik:", value=default_prompt, height=100)
+        user_prompt = st.text_area("Zapytanie do modelu Bielik (Okno IN):", value=default_prompt, height=100)
         
         if st.button("🚀 Wyślij Zapytanie do Bielika", type="primary"):
-            with st.spinner("Bielik 11B przetwarza zapytanie w chmurze Warszawa..."):
-                try:
-                    resp_text = _bielik_mod.query_bielik(user_prompt, endpoint_url=ollama_endpoint, model_name=selected_model)
-                    st.markdown("#### 🦅 Odpowiedź modelu Bielik:")
-                    st.info(resp_text)
-                except Exception as e:
-                    st.error(f"Błąd komunikacji: {e}")
+            st.markdown("#### 🦅 Odpowiedź na żywo:")
+            try:
+                st.write_stream(_bielik_mod.stream_bielik(user_prompt, endpoint_url=ollama_endpoint, model_name=selected_model, num_predict=350))
+            except Exception as e:
+                st.error(f"Błąd komunikacji z węzłem: {e}")
 
     with subtab_extract:
         st.markdown("##### Przetwarzanie i strukturyzacja dokumentu nieustrukturyzowanego")
